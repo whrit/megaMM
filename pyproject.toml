@@ -6,12 +6,15 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "llvmlite>=0.46.0",
+    "matplotlib>=3.10.8",
     "numba>=0.63.1",
     "numpy>=2.3.5",
     "pandas>=2.3.3",
     "pomegranate>=1.1.2",
     "pyarrow>=22.0.0",
     "rich>=14.2.0",
+    "scikit-learn>=1.8.0",
+    "seaborn>=0.13.2",
     "torch>=2.9.1",
     "typer>=0.21.1",
     "yfinance>=1.0",
