@@ -184,10 +184,8 @@ def walkforward(
 
     panel = to_tensor(aligned, device=str(device))
 
-    with create_progress() as progress:
-        task = progress.add_task("[cyan]Training final model", total=1)
-        tr = train_dense_hmm(panel.X, k=best_k, cfg=cfg.model)
-        progress.update(task, completed=1)
+    log_info("Training final model (this may take a moment)...")
+    tr = train_dense_hmm(panel.X, k=best_k, cfg=cfg.model, verbose=True)
 
     # Use actual device from trained model (may differ if fallback occurred)
     model_device = tr.device

@@ -31,7 +31,7 @@
   },
   "eval": {
     "min_train_years": 5,
-    "test_block_days": 252,
+    "test_block_days": 63,
     "step_days": 63
   },
   "thresholds": {

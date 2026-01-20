@@ -117,28 +117,40 @@ def walk_forward(features: Dict[str, pd.DataFrame], cfg: AppConfig, generate_cha
                 train_dates = dates[:train_end_idx]
                 test_dates = dates[train_end_idx:train_end_idx + test_block]
 
-                # Update progress description
-                progress.update(main_task, description=f"[cyan]K={k} Split {split_i}/{n_splits}")
+                # Update progress description for training phase
+                progress.update(main_task, description=f"[cyan]K={k} Split {split_i}/{n_splits} [Training]")
 
                 # Use configured device (with automatic fallback in train_dense_hmm)
                 device = resolve_device(cfg.model.device)
                 train_panel = to_tensor({tk: aligned[tk].loc[train_dates, FEATURE_COLUMNS] for tk in tickers}, device=str(device))
-                tr = train_dense_hmm(train_panel.X, k=k, cfg=cfg.model)
+                tr = train_dense_hmm(train_panel.X, k=k, cfg=cfg.model, verbose=False)
 
                 # Use actual device from trained model (may differ if fallback occurred)
                 model_device = tr.device
                 A = estimate_transition_matrix_from_forward_backward(tr.model, train_panel.X.to(model_device))
 
+                # Update progress for prediction phase
+                progress.update(main_task, description=f"[cyan]K={k} Split {split_i}/{n_splits} [Predicting]")
+
+                # Run predictions for all test dates
+                n_preds = len(test_dates) * len(tickers)
+                pred_count = 0
                 for d in test_dates:
                     prefix_dates = dates[dates <= d]
                     for tk in tickers:
                         y = labels[tk].loc[d]
                         if pd.isna(y):
+                            pred_count += 1
                             continue
                         X_prefix = to_tensor({tk: aligned[tk].loc[prefix_dates, FEATURE_COLUMNS]}, device=model_device).X
                         pred = predict_one(tr.model, A, X_prefix, cfg.thresholds)
                         all_y.append(int(y))
                         all_p.append((pred.p_down, pred.p_mid, pred.p_up))
+                        pred_count += 1
+
+                        # Update description with prediction progress every 100 predictions
+                        if pred_count % 100 == 0:
+                            progress.update(main_task, description=f"[cyan]K={k} Split {split_i}/{n_splits} [Pred {pred_count}/{n_preds}]")
 
                 train_end_idx += step
                 progress.advance(main_task)

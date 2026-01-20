@@ -27,11 +27,17 @@ def resolve_device(requested: str) -> torch.device:
     return torch.device("cpu")
 
 
-def train_dense_hmm(X: torch.Tensor, k: int, cfg: ModelConfig) -> TrainResult:
+def train_dense_hmm(X: torch.Tensor, k: int, cfg: ModelConfig, verbose: bool = False) -> TrainResult:
     """Train a DenseHMM with GPU support for CUDA/MPS devices.
 
     Per pomegranate docs, the model and data must be on the same device.
     We create the model on CPU, move it to the target device, then fit.
+
+    Args:
+        X: Feature tensor of shape [B, T, D]
+        k: Number of hidden states
+        cfg: Model configuration
+        verbose: Whether to print training progress (default False)
     """
     t0 = time.time()
     device = resolve_device(cfg.device)
@@ -45,7 +51,7 @@ def train_dense_hmm(X: torch.Tensor, k: int, cfg: ModelConfig) -> TrainResult:
         tol=cfg.tol,
         inertia=cfg.inertia,
         random_state=cfg.random_state,
-        verbose=True,
+        verbose=verbose,
     )
 
     # Move model and data to target device, then fit
