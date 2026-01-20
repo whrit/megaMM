@@ -1,0 +1,41 @@
+{
+  "data": {
+    "interval": "1d",
+    "period": "max",
+    "auto_adjust": true,
+    "back_adjust": false,
+    "repair": true,
+    "keepna": false
+  },
+  "features": {
+    "vol_window": 20,
+    "vol_lookback": 60,
+    "ma_window": 20,
+    "rsi_window": 14,
+    "z_window": 252,
+    "clip_z": 8.0
+  },
+  "model": {
+    "k_candidates": [
+      3,
+      4,
+      5,
+      6
+    ],
+    "max_iter": 500,
+    "tol": 0.1,
+    "init": "random",
+    "inertia": 0.0,
+    "random_state": 42,
+    "device": "mps"
+  },
+  "eval": {
+    "min_train_years": 5,
+    "test_block_days": 252,
+    "step_days": 63
+  },
+  "thresholds": {
+    "up_pct": 0.05,
+    "down_pct": -0.05
+  }
+}

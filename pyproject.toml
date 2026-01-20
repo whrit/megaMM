@@ -1,0 +1,27 @@
+[project]
+name = "megaMM"
+version = "0.1.0"
+description = "Mega-cap HMM regime model with pomegranate + yfinance"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "llvmlite>=0.46.0",
+    "numba>=0.63.1",
+    "numpy>=2.3.5",
+    "pandas>=2.3.3",
+    "pomegranate>=1.1.2",
+    "pyarrow>=22.0.0",
+    "rich>=14.2.0",
+    "torch>=2.9.1",
+    "typer>=0.21.1",
+    "yfinance>=1.0",
+]
+
+[project.scripts]
+qt-hmm = "megamm.cli:app"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
