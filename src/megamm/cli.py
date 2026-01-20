@@ -138,42 +138,82 @@ def features(
     log_success("Feature computation complete")
 
 @app.command()
-def walkforward():
+def walkforward(
+    generate_charts: bool = typer.Option(True, "--charts/--no-charts", help="Generate evaluation charts"),
+):
+    """Run walk-forward evaluation and train best model."""
     cfg = load_config()
     tickers = load_universe()
     ensure_dirs()
 
+    log_section("Walk-Forward Pipeline", f"Evaluating K candidates on {len(tickers)} tickers")
+
+    # Load features
     feats = {}
-    for tk in tickers:
-        p = ARTIFACTS / "data" / "features" / f"{tk}.parquet"
-        if not p.exists():
-            raise FileNotFoundError(f"Missing features for {tk}. Run `qt-hmm features` first.")
-        df = pd.read_parquet(p)
-        df.index = pd.to_datetime(df.index)
-        df.sort_index(inplace=True)
-        feats[tk] = df
+    with create_progress() as progress:
+        task = progress.add_task("[cyan]Loading features", total=len(tickers))
+        for tk in tickers:
+            p = ARTIFACTS / "data" / "features" / f"{tk}.parquet"
+            if not p.exists():
+                raise FileNotFoundError(f"Missing features for {tk}. Run `qt-hmm features` first.")
+            df = pd.read_parquet(p)
+            df.index = pd.to_datetime(df.index)
+            df.sort_index(inplace=True)
+            feats[tk] = df
+            progress.advance(task)
 
-    print("Running walk-forward evaluation (this may take a while)...")
-    results = walk_forward(feats, cfg)
+    # Run walk-forward evaluation
+    results = walk_forward(feats, cfg, generate_charts=generate_charts)
 
+    # Save results
     rep = pd.DataFrame([r.__dict__ for r in results]).sort_values("log_loss")
     out_csv = ARTIFACTS / "reports" / "walkforward_metrics.csv"
     rep.to_csv(out_csv, index=False)
-    print(f"[green]Wrote[/green] {out_csv}")
+    log_success(f"Saved metrics to {out_csv}")
 
+    # Train final model on full history
     best_k = int(rep.iloc[0]["k"])
-    print(f"Training best model on full aligned history with K={best_k}...")
+    console.print()
+    log_section("Final Model Training", f"Training on full history with K={best_k}")
+
     aligned = align_intersection(feats, min_len=cfg.eval.min_train_years * 252 + 20)
 
     # Use configured device (CUDA/MPS/CPU) with automatic fallback
     device = resolve_device(cfg.model.device)
-    print(f"Using device: {device}")
+    log_info(f"Requested device: {cfg.model.device}, using: {device}")
+
     panel = to_tensor(aligned, device=str(device))
-    tr = train_dense_hmm(panel.X, k=best_k, cfg=cfg.model)
+
+    with create_progress() as progress:
+        task = progress.add_task("[cyan]Training final model", total=1)
+        tr = train_dense_hmm(panel.X, k=best_k, cfg=cfg.model)
+        progress.update(task, completed=1)
 
     # Use actual device from trained model (may differ if fallback occurred)
     model_device = tr.device
     A = estimate_transition_matrix_from_forward_backward(tr.model, panel.X.to(model_device))
+
+    # Log model summary
+    console.print()
+    log_model_summary(
+        k=best_k,
+        train_seconds=tr.train_seconds,
+        device=model_device,
+        n_tickers=len(panel.tickers),
+        n_dates=len(panel.dates),
+        transition_matrix=A,
+    )
+
+    # Save transition matrix chart
+    if generate_charts:
+        charts_dir = ARTIFACTS / "reports" / "charts"
+        charts_dir.mkdir(parents=True, exist_ok=True)
+        plot_transition_matrix(
+            A.cpu().numpy() if hasattr(A, 'cpu') else A,
+            charts_dir / "transition_matrix.png",
+            title=f"Final Model Transition Matrix (K={best_k})"
+        )
+        log_success(f"Saved {charts_dir / 'transition_matrix.png'}")
 
     meta = {
         "best_k": best_k,
@@ -185,16 +225,68 @@ def walkforward():
         "device": model_device,
     }
     save_best(tr.model, A, cfg, meta)
-    print(f"[green]Saved best model[/green] to artifacts/models/best/ (trained on {model_device})")
+
+    console.print()
+    log_stats_table({
+        "Best K": best_k,
+        "Training Time": f"{tr.train_seconds:.2f}s",
+        "Device": model_device,
+        "Tickers": len(panel.tickers),
+        "Date Range": f"{panel.dates[0].date()} to {panel.dates[-1].date()}",
+        "Output": "artifacts/models/best/",
+    }, title="Final Model Summary")
+
+    log_success("Walk-forward pipeline complete")
 
 @app.command()
-def predict():
+def predict(
+    plot_dist: bool = typer.Option(False, "--plot-dist", help="Generate prediction distribution chart"),
+):
+    """Generate predictions using the trained model."""
     cfg = load_config()
     tickers = load_universe()
     ensure_dirs()
-    df = predict_latest(tickers, cfg)
-    print(df.head(10))
-    print("[green]Wrote[/green] artifacts/predictions/predictions.parquet and .csv")
+
+    log_section("Prediction Generation", f"Generating predictions for {len(tickers)} tickers")
+
+    with create_progress() as progress:
+        task = progress.add_task("[cyan]Running predictions", total=1)
+        df = predict_latest(tickers, cfg)
+        progress.update(task, completed=1)
+
+    # Compute and display summary
+    summary = format_prediction_summary(df)
+    console.print()
+    log_prediction_summary(summary)
+
+    # Generate distribution chart if requested
+    if plot_dist and "p_up" in df.columns and "p_down" in df.columns:
+        charts_dir = ARTIFACTS / "reports" / "charts"
+        charts_dir.mkdir(parents=True, exist_ok=True)
+        plot_prediction_distribution(
+            df[["p_down", "p_mid", "p_up"]].values,
+            charts_dir / "prediction_distribution.png",
+            title=f"Prediction Distribution ({summary.get('asof_date', 'Latest')})"
+        )
+        log_success(f"Saved {charts_dir / 'prediction_distribution.png'}")
+
+    # Save predictions
+    out_pq = ARTIFACTS / "predictions" / "predictions.parquet"
+    out_csv = ARTIFACTS / "predictions" / "predictions.csv"
+    df.to_parquet(out_pq)
+    df.to_csv(out_csv, index=False)
+
+    console.print()
+    log_stats_table({
+        "Tickers": len(df),
+        "As-of Date": summary.get("asof_date", "N/A"),
+        "Bullish": summary.get("bullish_count", "N/A"),
+        "Neutral": summary.get("neutral_count", "N/A"),
+        "Bearish": summary.get("bearish_count", "N/A"),
+        "Output": "artifacts/predictions/",
+    }, title="Prediction Output")
+
+    log_success("Prediction generation complete")
 
 if __name__ == "__main__":
     app()
