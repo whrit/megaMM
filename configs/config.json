@@ -27,7 +27,7 @@
     "init": "random",
     "inertia": 0.0,
     "random_state": 42,
-    "device": "cuda"
+    "device": "auto"
   },
   "eval": {
     "min_train_years": 5,

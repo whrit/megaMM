@@ -68,6 +68,8 @@ def walk_forward(features: Dict[str, pd.DataFrame], cfg: AppConfig, generate_cha
         "Features": len(FEATURE_COLUMNS),
         "Device": cfg.model.device,
     }, title="Dataset Summary")
+    resolved_device = resolve_device(cfg.model.device)
+    log_info(f"Requested device: {cfg.model.device}, using: {resolved_device}")
 
     up_thr = float(torch.log(torch.tensor(1.0 + cfg.thresholds.up_pct)).item())
     down_thr = float(torch.log(torch.tensor(1.0 + cfg.thresholds.down_pct)).item())

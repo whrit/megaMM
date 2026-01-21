@@ -1,6 +1,7 @@
 from __future__ import annotations
 import time
 import pandas as pd
+import torch
 import typer
 
 from .config import load_config, load_universe
@@ -285,6 +286,29 @@ def predict(
     }, title="Prediction Output")
 
     log_success("Prediction generation complete")
+
+@app.command()
+def device():
+    """Show device availability and resolved runtime device."""
+    cfg = load_config()
+    requested = cfg.model.device
+    resolved = resolve_device(requested)
+
+    log_section("Device Probe", "Detect GPU/MPS availability and resolve runtime device")
+    log_stats_table({
+        "Requested": requested,
+        "Resolved": str(resolved),
+        "CUDA Available": torch.cuda.is_available(),
+        "CUDA Version": torch.version.cuda or "N/A",
+        "MPS Available": torch.backends.mps.is_available(),
+    }, title="Device Availability")
+
+    if requested == "cuda" and not torch.cuda.is_available():
+        log_warning("CUDA requested but not available; falling back to CPU.")
+    elif requested == "mps" and not torch.backends.mps.is_available():
+        log_warning("MPS requested but not available; falling back to CPU.")
+    elif requested == "auto":
+        log_info("Auto selects CUDA if available, otherwise MPS, otherwise CPU.")
 
 if __name__ == "__main__":
     app()

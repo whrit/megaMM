@@ -72,6 +72,10 @@ Edit:
 - `configs/universe.json` (tickers)
 - `configs/config.json` (windows, K candidates, walk-forward params)
 
+Device selection:
+- `model.device`: `"auto"` (CUDA → MPS → CPU), `"cuda"`, `"mps"`, or `"cpu"`.
+- Check availability with `qt-hmm device`.
+
 ## Outputs
 - Raw data: `artifacts/data/raw/{TICKER}.parquet`
 - Features: `artifacts/data/features/{TICKER}.parquet`
@@ -86,6 +90,7 @@ Edit:
 - If you see an error extracting transition matrix, run:
   - `python -m qt_hmm.debug.inspect_model artifacts/models/best/model.pt`
   and paste the output; then update `qt_hmm/models/transition.py`.
+- **CUDA requires a CUDA-enabled PyTorch build**. If `torch.cuda.is_available()` is false, `"cuda"` will fall back to CPU. On Apple Silicon, use `"mps"` or `"auto"`.
 
 ## License
 MIT

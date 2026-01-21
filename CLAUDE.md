@@ -84,13 +84,17 @@ artifacts/
 
 ## pomegranate Notes
 
-**GPU Support**: Training and inference support CUDA and MPS devices via `cfg.model.device` in `configs/config.json`. Set to `"cuda"` for NVIDIA GPUs, `"mps"` for Apple Silicon, or `"cpu"` for CPU-only. The system:
+**GPU Support**: Training and inference support CUDA and MPS devices via `cfg.model.device` in `configs/config.json`. Use `"auto"` (CUDA → MPS → CPU), or set `"cuda"`, `"mps"`, or `"cpu"` explicitly. The system:
 
 1. Creates the model on CPU, then moves it to the target device with `.to(device)`
 2. Moves training/inference data to the same device
 3. Automatically falls back to CPU if the requested device fails (e.g., MPS KMeans issues)
 4. Saves models on CPU for portability, loads to configured device for inference
 
+Use `qt-hmm device` to check availability and see the resolved runtime device.
+
 **MPS Caveat**: Apple MPS support can be unstable with pomegranate's internal KMeans during initialization. If MPS training fails, the system automatically falls back to CPU. CUDA is the most reliable GPU option.
+
+**CUDA Note**: CUDA requires a CUDA-enabled PyTorch build. If `torch.cuda.is_available()` is false, `"cuda"` will fall back to CPU; use `"auto"` or `"mps"` on Apple Silicon.
 
 **Transition Matrix**: The DenseHMM API can vary by version. If transition matrix extraction fails, run `python -m megamm.debug.inspect_model artifacts/models/best/model.pt` and update `models/transition.py` accordingly.

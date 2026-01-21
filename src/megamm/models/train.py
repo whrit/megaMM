@@ -15,15 +15,21 @@ class TrainResult:
 
 
 def resolve_device(requested: str) -> torch.device:
-    """Resolve requested device string to a torch.device, with availability checks."""
+    """Resolve requested device string to a torch.device, with availability checks.
+
+    Supports "auto" (prefer CUDA -> MPS -> CPU).
+    """
     requested = requested.lower()
-    if requested == "cuda" and torch.cuda.is_available():
-        return torch.device("cuda")
-    if requested == "mps" and torch.backends.mps.is_available():
-        return torch.device("mps")
-    if requested in ("cuda", "mps"):
-        # Requested GPU but not available - fall back to CPU
+    if requested == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
         return torch.device("cpu")
+    if requested == "cuda":
+        return torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    if requested == "mps":
+        return torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
     return torch.device("cpu")
 
 
