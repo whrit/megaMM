@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
+import math
 import time
 import pandas as pd
 import torch
@@ -10,7 +11,8 @@ from ..dataset import align_intersection, to_tensor
 from ..features.schema import FEATURE_COLUMNS
 from ..models.train import train_dense_hmm, resolve_device
 from ..models.transition import estimate_transition_matrix_from_forward_backward
-from ..models.predict import predict_one
+from ..models.params import get_return_mu_sigma
+from ..models.math import normal_tail_ge, normal_tail_le
 from ..paths import ARTIFACTS
 from .metrics import log_loss_3class, brier_3class, tail_metrics
 from ..reporting.console import (
@@ -59,6 +61,7 @@ def walk_forward(features: Dict[str, pd.DataFrame], cfg: AppConfig, generate_cha
     aligned = align_intersection(features, min_len=cfg.eval.min_train_years * 252 + cfg.eval.test_block_days + 20)
     tickers = sorted(aligned.keys())
     dates = aligned[tickers[0]].index
+    date_to_idx = {d: i for i, d in enumerate(dates)}
 
     # Log data summary
     log_stats_table({
@@ -134,25 +137,46 @@ def walk_forward(features: Dict[str, pd.DataFrame], cfg: AppConfig, generate_cha
                 # Update progress for prediction phase
                 progress.update(main_task, description=f"[cyan]K={k} Split {split_i}/{n_splits} [Predicting]")
 
-                # Run predictions for all test dates
+                # Run predictions for all test dates (vectorized per ticker)
                 n_preds = len(test_dates) * len(tickers)
                 pred_count = 0
-                for d in test_dates:
-                    prefix_dates = dates[dates <= d]
-                    for tk in tickers:
-                        y = labels[tk].loc[d]
-                        if pd.isna(y):
-                            pred_count += 1
-                            continue
-                        X_prefix = to_tensor({tk: aligned[tk].loc[prefix_dates, FEATURE_COLUMNS]}, device=model_device).X
-                        pred = predict_one(tr.model, A, X_prefix, cfg.thresholds)
-                        all_y.append(int(y))
-                        all_p.append((pred.p_down, pred.p_mid, pred.p_up))
-                        pred_count += 1
+                mus, sigmas = get_return_mu_sigma(tr.model)
+                up_thr = torch.tensor(math.log(1.0 + cfg.thresholds.up_pct), device=mus.device, dtype=mus.dtype)
+                dn_thr = torch.tensor(math.log(1.0 + cfg.thresholds.down_pct), device=mus.device, dtype=mus.dtype)
+                p_up_k = normal_tail_ge(up_thr, mus, sigmas)
+                p_dn_k = normal_tail_le(dn_thr, mus, sigmas)
 
-                        # Update description with prediction progress every 100 predictions
-                        if pred_count % 100 == 0:
-                            progress.update(main_task, description=f"[cyan]K={k} Split {split_i}/{n_splits} [Pred {pred_count}/{n_preds}]")
+                pred_cache: Dict[str, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = {}
+                with torch.no_grad():
+                    for tk in tickers:
+                        X_full = to_tensor({tk: aligned[tk].loc[dates, FEATURE_COLUMNS]}, device=model_device).X
+                        post = tr.model.predict_proba(X_full)
+                        gamma_full = post[0]
+                        pi_t1_all = gamma_full @ A
+                        p_up_all = (pi_t1_all * p_up_k).sum(dim=1)
+                        p_dn_all = (pi_t1_all * p_dn_k).sum(dim=1)
+                        p_mid_all = (1.0 - p_up_all - p_dn_all).clamp_min(0.0)
+                        pred_cache[tk] = (p_dn_all, p_mid_all, p_up_all)
+
+                    for d in test_dates:
+                        idx = date_to_idx[d]
+                        for tk in tickers:
+                            y = labels[tk].loc[d]
+                            if pd.isna(y):
+                                pred_count += 1
+                                continue
+                            p_dn_all, p_mid_all, p_up_all = pred_cache[tk]
+                            all_y.append(int(y))
+                            all_p.append((
+                                float(p_dn_all[idx].item()),
+                                float(p_mid_all[idx].item()),
+                                float(p_up_all[idx].item()),
+                            ))
+                            pred_count += 1
+
+                            # Update description with prediction progress every 100 predictions
+                            if pred_count % 100 == 0:
+                                progress.update(main_task, description=f"[cyan]K={k} Split {split_i}/{n_splits} [Pred {pred_count}/{n_preds}]")
 
                 train_end_idx += step
                 progress.advance(main_task)
